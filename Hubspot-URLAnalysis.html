@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HubSpot PDF → Spreadsheet</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--bd:#ddd;--ac:#ff5c35;--card:#f6f6f6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1b;--fg:#eee;--mut:#aaa;--bd:#444;--card:#262626}}
+:root[data-theme="dark"]{--bg:#1b1b1b;--fg:#eee;--mut:#aaa;--bd:#444;--card:#262626}
+body{margin:0;padding:20px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+h1{font-size:20px;margin:0 0 4px}p{color:var(--mut);margin:0 0 16px}
+#drop{border:2px dashed var(--bd);border-radius:12px;padding:32px;text-align:center;cursor:pointer;background:var(--card)}
+#drop.over{border-color:var(--ac)}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer;margin:12px 8px 0 0}
+button.s{background:var(--card);color:var(--fg);border:1px solid var(--bd)}
+.wrap{overflow-x:auto;margin-top:12px;border:1px solid var(--bd);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
+th,td{padding:6px 10px;border-bottom:1px solid var(--bd);text-align:left}th{background:var(--card)}
+#msg{margin-top:10px;color:var(--mut);font-size:13px}textarea{width:100%;height:90px;margin-top:10px;display:none;background:var(--card);color:var(--fg);border:1px solid var(--bd)}
+</style></head><body>
+<h1>HubSpot email PDF → spreadsheet rows</h1>
+<p>Drop one or more HubSpot email report PDFs. Rows build up below; copy and paste into Excel or Google Sheets.</p>
+<div id="drop">Click or drop PDF(s) here<input id="f" type="file" accept="application/pdf" multiple hidden></div>
+<div><button id="copy">Copy rows (with headers)</button><button id="copy2" class="s">Copy rows only</button><button id="clr" class="s">Clear all</button></div>
+<div id="msg"></div><textarea id="ta" readonly></textarea>
+<div class="wrap"><table><thead id="h"></thead><tbody id="b"></tbody></table></div>
+<script>
+const H=["Journey","Total Delivered","Total Valid Opens","Unique Valid Opens","Total Valid Clicks","Unique Valid Clicks","Open Rate","Click Rate","Valid CTOR","Links in the email","Total Clicks"];
+let rows=[];try{rows=JSON.parse(localStorage.getItem("hsrows")||"[]")}catch(e){}
+const save=()=>{try{localStorage.setItem("hsrows",JSON.stringify(rows))}catch(e){}};
+const $=id=>document.getElementById(id),msg=t=>$("msg").textContent=t;
+function render(){$("h").innerHTML="<tr>"+H.map(x=>"<th>"+x+"</th>").join("")+"</tr>";
+$("b").innerHTML=rows.map(r=>"<tr>"+r.map(c=>"<td>"+String(c).replace(/</g,"&lt;")+"</td>").join("")+"</tr>").join("")}
+const num=m=>m?m[1].replace(/,/g,""):"";
+function parse(t){
+ const g=re=>t.match(re), pct=m=>m?m[1]+"%":"";
+ let name=(g(/Email name\s+(.+?)\s+Sent by/)||[])[1]||"";
+ const sec=(t.split("Top clicked links")[1]||"").split("Top engaged contacts")[0];
+ let links=0,sum=0,m,re=/https?:\/\/\S+\s+(\d+)(?=\s|$)/g;
+ while((m=re.exec(sec))){links++;sum+=+m[1]}
+ return [name.trim(),num(g(/SUCCESSFUL DELIVERIES\s+([\d,]+)/)),num(g(/Total opens, excluding bots\s+([\d,]+)/)),
+ num(g(/Unique opens, excluding bots\s+([\d,]+)/)),num(g(/Total clicks, excluding bots\s+([\d,]+)/)),
+ num(g(/Unique clicks, excluding bots\s+([\d,]+)/)),pct(g(/Open rate\s+([\d.]+)%/)),pct(g(/Click rate\s+([\d.]+)%/)),
+ pct(g(/Click-through\s+rate\s+([\d.]+)%/)),links,sum]}
+async function read(file){
+ const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;let t="";
+ for(let i=1;i<=pdf.numPages;i++){const p=await (await pdf.getPage(i)).getTextContent();t+=p.items.map(x=>x.str+(x.hasEOL?"\n":" ")).join("")+"\n"}
+ return t.replace(/[ \t]+/g," ")}
+async function handle(files){
+ for(const f of files){try{msg("Reading "+f.name+"…");const r=parse(await read(f));
+  if(!r[0]||!r[1]){msg("Couldn't find the stats in "+f.name+" — is it a HubSpot email report?");continue}
+  const i=rows.findIndex(x=>x[0]===r[0]);i>=0?rows[i]=r:rows.push(r);save();render();msg("Added: "+r[0])}
+ catch(e){msg("Error reading "+f.name+": "+e.message)}}}
+async function copy(withH){const tsv=(withH?H.join("\t")+"\n":"")+rows.map(r=>r.join("\t")).join("\n");
+ try{await navigator.clipboard.writeText(tsv);msg("Copied! Paste into your spreadsheet.")}
+ catch(e){const ta=$("ta");ta.style.display="block";ta.value=tsv;ta.select();msg("Select all in the box below and copy (Ctrl/Cmd+C).")}}
+$("drop").onclick=()=>$("f").click();$("f").onchange=e=>handle(e.target.files);
+$("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("over")};
+$("drop").ondragleave=()=>$("drop").classList.remove("over");
+$("drop").ondrop=e=>{e.preventDefault();$("drop").classList.remove("over");handle(e.dataTransfer.files)};
+$("copy").onclick=()=>copy(true);$("copy2").onclick=()=>copy(false);
+$("clr").onclick=()=>{rows=[];save();render();msg("Cleared.")};
+render();
+</script></body></html>
