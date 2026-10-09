@@ -1,0 +1,95 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HubSpot PDF → Spreadsheet</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--bd:#ddd;--ac:#ff5c35;--card:#f6f6f6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1b1b1b;--fg:#eee;--mut:#aaa;--bd:#444;--card:#262626}}
+:root[data-theme="dark"]{--bg:#1b1b1b;--fg:#eee;--mut:#aaa;--bd:#444;--card:#262626}
+body{margin:0;padding:20px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+h1{font-size:20px;margin:0 0 4px}p{color:var(--mut);margin:0 0 16px}
+#drop{border:2px dashed var(--bd);border-radius:12px;padding:32px;text-align:center;cursor:pointer;background:var(--card)}
+#drop.over{border-color:var(--ac)}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer;margin:12px 8px 0 0}
+button.s{background:var(--card);color:var(--fg);border:1px solid var(--bd)}
+.wrap{overflow-x:auto;margin-top:12px;border:1px solid var(--bd);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:13px;white-space:nowrap}
+th,td{padding:6px 10px;border-bottom:1px solid var(--bd);text-align:left}th{background:var(--card)}
+#msg{margin-top:10px;color:var(--mut);font-size:13px}textarea{width:100%;height:90px;margin-top:10px;display:none;background:var(--card);color:var(--fg);border:1px solid var(--bd)}
+a{color:var(--ac)}</style></head><body>
+<h1>HubSpot PDF → Spreadsheet</h1>
+<p>Drop one or more HubSpot email report PDFs. Rows build up below; copy and paste into Excel or Google Sheets.</p>
+<input id="ght" type="password" placeholder="Paste your GitHub access token here before uploading" style="width:100%;margin-bottom:12px;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--fg);font-size:14px">
+<div id="drop">Click or drop PDF(s) here<input id="f" type="file" accept="application/pdf" multiple hidden></div>
+<div><button id="copy">Copy rows (with headers)</button><button id="copy2" class="s">Copy rows only</button><label style="margin-left:8px;font-size:13px"><input type="checkbox" id="rep"> Repeat journey stats on every link row</label><button id="clr" class="s">Clear all</button></div>
+<div id="msg"></div><textarea id="ta" readonly></textarea>
+<div class="wrap"><table><thead id="h"></thead><tbody id="b"></tbody></table></div>
+<script>
+const H=["Journey","Total Delivered","Total Valid Opens","Unique Valid Opens","Total Valid Clicks","Unique Valid Clicks","Open Rate","Click Rate","Valid CTOR","Links in the email","Total Clicks","Source","View online"];
+let rows=[],lk=[];try{rows=JSON.parse(localStorage.getItem("hsrows")||"[]");lk=JSON.parse(localStorage.getItem("hslinks")||"[]")}catch(e){}
+const save=()=>{try{localStorage.setItem("hsrows",JSON.stringify(rows));localStorage.setItem("hslinks",JSON.stringify(lk))}catch(e){}};
+const $=id=>document.getElementById(id),msg=t=>$("msg").textContent=t;
+function flat(rs){const out=[],R=$("rep")&&$("rep").checked;(rs||rows).forEach(r=>{const L=lk.filter(x=>x[0]===r[0]),X=[r[11]||"",r[12]||""];
+ if(!L.length)out.push(r.slice(0,9).concat(["",""],X));
+ L.forEach((l,i)=>{const b=r.slice(0,9),f=i==0||R;out.push((f?b:b.map(()=>"")).concat([l[1],l[2]],f?X:["",""]))})});return out}
+function render(){const F=flat();$("h").innerHTML="<tr>"+H.map(x=>"<th>"+x+"</th>").join("")+"</tr>";
+const esc=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;");
+$("b").innerHTML=F.map(r=>"<tr>"+r.map((c,i)=>"<td>"+(i>=11&&c?'<a href="'+esc(c)+'" title="'+esc(c)+'" target="_blank" rel="noopener">'+(i==11?"View PDF":"Open email")+"</a>":esc(c))+"</td>").join("")+"</tr>").join("")}
+const num=m=>m?m[1].replace(/,/g,""):"";
+function parse(t){
+ const g=re=>t.match(re), pct=m=>m?m[1]+"%":"";
+ let name=(g(/Email name\s+(.+?)\s+Sent by/)||[])[1]||"";
+ const sec=(t.split("Top clicked links")[1]||"").split("Top engaged contacts")[0];
+ let links=0,sum=0,L=[];
+ sec.split("\n").forEach(ln=>{const m=ln.trim().match(/^(https?:\/\/.+?)\s+(\d+)$/);
+  if(m){const u=m[1].replace(/\s+/g,"").replace(/…$/,"…");links++;sum+=+m[2];L.push([name.trim(),u,+m[2]])}});
+ const row=[name.trim(),num(g(/SUCCESSFUL DELIVERIES\s+([\d,]+)/)),num(g(/Total opens, excluding bots\s+([\d,]+)/)),
+ num(g(/Unique opens, excluding bots\s+([\d,]+)/)),num(g(/Total clicks, excluding bots\s+([\d,]+)/)),
+ num(g(/Unique clicks, excluding bots\s+([\d,]+)/)),pct(g(/Open rate\s+([\d.]+)%/)),pct(g(/Click rate\s+([\d.]+)%/)),
+ pct(g(/Click-through\s+rate\s+([\d.]+)%/)),links,sum];return {row,L}}
+async function read(file){
+ const pdf=await pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;let t="",online="";
+ for(let i=1;i<=pdf.numPages;i++){const pg=await pdf.getPage(i),c=await pg.getTextContent();
+  const pt=c.items.map(x=>x.str+(x.hasEOL?"\n":" ")).join("");t+=pt+"\n";
+  if(!online&&/unable to see the message/i.test(pt)){const an=await pg.getAnnotations();
+   const a=an.find(x=>x.subtype==="Link"&&x.url&&/hs-sites\.com/.test(x.url));if(a)online=a.url.split("?")[0]}}
+ return {text:t.replace(/[ \t]+/g," "),online}}
+const cfg=()=>({o:"ivitiongson",r:"MMAU",b:"main",f:"reports",t:$("ght").value.trim()});
+const toB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=()=>rej(new Error("Could not read file"));r.readAsDataURL(f)});
+async function ghUpload(file,c){
+ const name=file.name.replace(/[^\w.\-]+/g,"_"),path=(c.f?c.f+"/":"")+name,enc=path.split("/").map(encodeURIComponent).join("/");
+ const api="https://api.github.com/repos/"+c.o+"/"+c.r+"/contents/"+enc,h={Authorization:"Bearer "+c.t,Accept:"application/vnd.github+json"};
+ let res=await fetch(api+"?ref="+encodeURIComponent(c.b),{headers:h});
+ if(res.status===404){const body=JSON.stringify({message:"Add report "+name,content:await toB64(file),branch:c.b});
+  res=await fetch(api,{method:"PUT",headers:h,body});
+  if(!res.ok)throw new Error(res.status==401?"GitHub rejected the token":res.status==403||res.status==404?"Token can't write to "+c.o+"/"+c.r+" (check repo name and Contents: read & write)":"GitHub error "+res.status)}
+ else if(!res.ok)throw new Error(res.status==401?"GitHub rejected the token":"GitHub error "+res.status);
+ return "https://github.com/"+c.o+"/"+c.r+"/blob/"+encodeURIComponent(c.b)+"/"+enc}
+let pending=null;
+async function gate(files){const c=cfg();
+ if(!c.t){pending=files;$("ght").focus();msg("Paste your GitHub access token in the box above to upload — your PDFs will be processed as soon as you enter it.");return false}
+ try{const r=await fetch("https://api.github.com/repos/"+encodeURIComponent(c.o)+"/"+encodeURIComponent(c.r),{headers:{Authorization:"Bearer "+c.t,Accept:"application/vnd.github+json"}});
+  if(!r.ok){pending=files;$("ght").focus();msg(r.status==401?"That token isn't valid. Check it and paste it again.":"This token can't access "+c.o+"/"+c.r+" (error "+r.status+"). Check the owner, repo and token.");return false}}
+ catch(e){msg("Couldn't reach GitHub: "+e.message);return false}
+ return true}
+async function handle(files){files=[...files];if(!(await gate(files)))return;
+ for(const f of files){try{msg("Reading "+f.name+"…");const R=await read(f),P=parse(R.text),r=P.row;
+  if(!r[0]||!r[1]){msg("Couldn't find the stats in "+f.name+" — is it a HubSpot email report?");continue}
+  const c=cfg();let note="";r[11]="";r[12]=R.online||(P.L.find(l=>/hs-sites\.com/.test(l[1]))||[])[1]||"";
+  try{msg("Saving "+f.name+" to GitHub…");r[11]=await ghUpload(f,c)}catch(e){note=" (PDF not saved: "+e.message+")"}
+  const i=rows.findIndex(x=>x[0]===r[0]);i>=0?rows[i]=r:rows.push(r);lk=lk.filter(x=>x[0]!==r[0]).concat(P.L);save();render();msg("Added: "+r[0]+note)}
+ catch(e){msg("Error reading "+f.name+": "+e.message)}}}
+async function copy(withH){const tsv=(withH?H.join("\t")+"\n":"")+flat().map(r=>r.join("\t")).join("\n");
+ try{await navigator.clipboard.writeText(tsv);msg("Copied! Paste into your spreadsheet.")}
+ catch(e){const ta=$("ta");ta.style.display="block";ta.value=tsv;ta.select();msg("Select all in the box below and copy (Ctrl/Cmd+C).")}}
+$("drop").onclick=()=>$("f").click();$("f").onchange=e=>{const fs=[...e.target.files];e.target.value="";handle(fs)};
+$("drop").ondragover=e=>{e.preventDefault();$("drop").classList.add("over")};
+$("drop").ondragleave=()=>$("drop").classList.remove("over");
+$("drop").ondrop=e=>{e.preventDefault();$("drop").classList.remove("over");handle(e.dataTransfer.files)};
+$("copy").onclick=()=>copy(true);$("copy2").onclick=()=>copy(false);$("rep").onchange=render;
+$("clr").onclick=()=>{rows=[];lk=[];save();render();msg("Cleared.")};
+try{$("ght").value=localStorage.getItem("hstoken")||""}catch(e){}
+$("ght").onchange=()=>{try{localStorage.setItem("hstoken",$("ght").value.trim())}catch(e){}const p=pending;pending=null;if(p&&$("ght").value.trim())handle(p)};
+render();
+</script></body></html>
